@@ -1260,7 +1260,7 @@ def _capture_project_editor_targets(matches: list[dict]) -> list[dict]:
 
 
 def _partition_editor_close_targets(targets: list[dict], owner_pid: int) -> tuple[list[dict], list[dict]]:
-    """Separate the editor receiving QUIT_EDITOR from same-project stale peers."""
+    """Separate the editor receiving the Slate close request from same-project stale peers."""
     graceful_targets = [target for target in targets if int(target["pid"]) == int(owner_pid)]
     if not graceful_targets:
         raise AppError(
@@ -2423,80 +2423,93 @@ def _close_editor_for_project(
             "policy": "require_clean",
         }
 
-    def close_result(result: dict) -> dict:
-        result = dict(result)
-        result["save_evidence"] = save_evidence
-        return result
-
-    # QUIT_EDITOR can tear down Remote Control before its HTTP response is
-    # delivered.  Bound that expected response race so process verification
-    # and the command's final JSON are not delayed by the client's 30s default.
-    api.exec_console("QUIT_EDITOR", timeout=1)
-    deadline = time.time() + 30
-    last_process_evidence = None
-    while time.time() < deadline:
-        if not api.is_alive():
-            drain_result = _wait_for_project_editor_exit(
-                state.session.project_path,
-                state.session.port,
-                timeout=EDITOR_CLOSE_PROCESS_GRACE_SECONDS,
-                targets=graceful_targets,
-            )
-            if drain_result is None:
-                drain_result = {"status": "closed", "port": state.session.port}
-            if drain_result.get("status") == "closed":
-                return close_result(_finish_partitioned_editor_close(
-                    state.session.project_path,
-                    state.session.port,
-                    target_pids,
-                    drain_result,
-                    stale_targets,
-                ))
-            raise AppError(
-                "EDITOR_CLOSE_FAILED",
-                drain_result.get("message", "Editor API closed but UnrealEditor process did not exit."),
-                exit_code=3,
-                details=drain_result,
-            )
-        if graceful_targets:
-            confirmed_exit, process_evidence = _project_process_exit_evidence(
-                state.session.project_path,
-                graceful_targets,
-            )
-            last_process_evidence = process_evidence
-            if confirmed_exit:
-                graceful_result = {
-                    "status": "closed",
-                    "port": state.session.port,
-                    "method": "project_process_exit",
-                    "target_pids": sorted(int(target["pid"]) for target in graceful_targets),
-                    "pid_evidence": process_evidence["pids"],
-                }
-                return close_result(_finish_partitioned_editor_close(
-                    state.session.project_path,
-                    state.session.port,
-                    target_pids,
-                    graceful_result,
-                    stale_targets,
-                ))
-        time.sleep(2)
-
-    kill_result = _kill_matching_project_editors(
-        state.session.project_path,
-        state.session.port,
-        success_message="Editor did not close gracefully within 30s; terminated matching UnrealEditor process.",
-        failure_message="Editor did not close within 30s and matching UnrealEditor process could not be terminated.",
-        expected_targets=targets,
+    from cli_anything.unreal.core.editor_lifecycle import (
+        capture_editor_disconnect_context,
+        close_editor_disconnect_context,
+        verify_editor_shutdown,
     )
-    if kill_result and kill_result.get("status") == "closed":
-        return close_result(kill_result)
 
-    details = kill_result or {"status": "timeout", "port": state.session.port}
-    details.setdefault("stage", "wait_for_project_process_exit")
-    if target_pids:
-        details["target_pids"] = target_pids
-        details["last_process_evidence"] = last_process_evidence
-    raise AppError("EDITOR_CLOSE_TIMEOUT", "Editor did not close within 30s.", exit_code=3, details=details)
+    disconnect_context = capture_editor_disconnect_context(api, state.session.project_path)
+    try:
+        def close_result(result: dict) -> dict:
+            result = dict(result)
+            result["shutdown_evidence"] = verify_editor_shutdown(
+                disconnect_context, forced=result.get("method") == "process_tree_kill",
+            )
+            result["save_evidence"] = save_evidence
+            return result
+
+        # MainFrame broadcasts editor close before subsystem teardown, allowing
+        # asset editors to release their subsystem references safely. Bound the
+        # expected HTTP disconnect while retaining process verification below.
+        api.exec_console("CLOSE_SLATE_MAINFRAME", timeout=1)
+        deadline = time.time() + 30
+        last_process_evidence = None
+        while time.time() < deadline:
+            if not api.is_alive():
+                drain_result = _wait_for_project_editor_exit(
+                    state.session.project_path,
+                    state.session.port,
+                    timeout=EDITOR_CLOSE_PROCESS_GRACE_SECONDS,
+                    targets=graceful_targets,
+                )
+                if drain_result is None:
+                    drain_result = {"status": "closed", "port": state.session.port}
+                if drain_result.get("status") == "closed":
+                    return close_result(_finish_partitioned_editor_close(
+                        state.session.project_path,
+                        state.session.port,
+                        target_pids,
+                        drain_result,
+                        stale_targets,
+                    ))
+                raise AppError(
+                    "EDITOR_CLOSE_FAILED",
+                    drain_result.get("message", "Editor API closed but UnrealEditor process did not exit."),
+                    exit_code=3,
+                    details=drain_result,
+                )
+            if graceful_targets:
+                confirmed_exit, process_evidence = _project_process_exit_evidence(
+                    state.session.project_path,
+                    graceful_targets,
+                )
+                last_process_evidence = process_evidence
+                if confirmed_exit:
+                    graceful_result = {
+                        "status": "closed",
+                        "port": state.session.port,
+                        "method": "project_process_exit",
+                        "target_pids": sorted(int(target["pid"]) for target in graceful_targets),
+                        "pid_evidence": process_evidence["pids"],
+                    }
+                    return close_result(_finish_partitioned_editor_close(
+                        state.session.project_path,
+                        state.session.port,
+                        target_pids,
+                        graceful_result,
+                        stale_targets,
+                    ))
+            time.sleep(2)
+
+        kill_result = _kill_matching_project_editors(
+            state.session.project_path,
+            state.session.port,
+            success_message="Editor did not close gracefully within 30s; terminated matching UnrealEditor process.",
+            failure_message="Editor did not close within 30s and matching UnrealEditor process could not be terminated.",
+            expected_targets=targets,
+        )
+        if kill_result and kill_result.get("status") == "closed":
+            return close_result(kill_result)
+
+        details = kill_result or {"status": "timeout", "port": state.session.port}
+        details.setdefault("stage", "wait_for_project_process_exit")
+        if target_pids:
+            details["target_pids"] = target_pids
+            details["last_process_evidence"] = last_process_evidence
+        raise AppError("EDITOR_CLOSE_TIMEOUT", "Editor did not close within 30s.", exit_code=3, details=details)
+    finally:
+        close_editor_disconnect_context(disconnect_context)
 
 
 def _exec_console_with_log_capture(api, command: str, timeout: int = 15) -> dict:

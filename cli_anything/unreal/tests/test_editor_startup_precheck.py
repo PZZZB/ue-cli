@@ -9,6 +9,66 @@ from unittest.mock import MagicMock, call, patch
 import pytest
 
 
+@pytest.mark.parametrize(
+    "exit_code,new_fatal,method,expected_exit",
+    [(0, False, "process_exit", 0),
+     (3, False, "process_exit", 3),
+     (0, True, "process_exit", 3),
+     (None, True, "process_exit", 3),
+     (None, False, "process_exit", 0),
+     (1, False, "process_tree_kill", 0),
+     (3, True, "process_tree_kill", 3)],
+)
+def test_editor_close_checks_new_shutdown_evidence(
+    mini_project, exit_code, new_fatal, method, expected_exit,
+):
+    from click.testing import CliRunner
+    from cli_anything.unreal.unreal_cli import cli
+
+    log_file = Path(mini_project).parent / "Saved" / "Logs" / "MiniProject.log"
+    log_file.parent.mkdir(parents=True)
+    log_file.write_text("Fatal error: historical crash\nLogInit: online\n", encoding="utf-8")
+    api = MagicMock()
+    api._verified_editor_pid = 98364
+    api._verified_editor_cmdline = f'UnrealEditor.exe "{mini_project}"'
+    api.is_alive.return_value = False
+    probe = MagicMock()
+    probe.snapshot.return_value = {
+        "editor_pid": 98364, "process_alive": False,
+        **({"process_exit_code": exit_code} if exit_code is not None else {}),
+    }
+
+    def shutdown(command, **kwargs):
+        assert command == "CLOSE_SLATE_MAINFRAME"
+        if new_fatal:
+            with log_file.open("a", encoding="utf-8") as handle:
+                handle.write("Unhandled Exception: EXCEPTION_ACCESS_VIOLATION reading address 0x78\n")
+        return {}
+
+    api.exec_console.side_effect = shutdown
+    with patch("cli_anything.unreal.commands.editor.require_editor", return_value=api), \
+         patch("cli_anything.unreal.utils.ue_backend.find_running_editors", return_value=[
+             {"pid": 98364, "project": mini_project},
+         ]), \
+         patch("cli_anything.unreal.core.editor_lifecycle._EditorProcessExitProbe", return_value=probe), \
+         patch("cli_anything.unreal.commands.editor._wait_for_project_editor_exit", return_value={
+             "status": "closed", "method": method,
+         }):
+        result = CliRunner().invoke(cli, ["--output", "json", "--project", mini_project, "editor", "close"])
+
+    assert result.exit_code == expected_exit, result.output
+    data = json.loads(result.output)
+    probe.close.assert_called_once()
+    api.exec_console.assert_called_once_with("CLOSE_SLATE_MAINFRAME", timeout=1)
+    if expected_exit:
+        assert data["code"] == "EDITOR_CLOSE_CRASHED"
+        assert data["details"]["stage"] == "editor_shutdown"
+        assert "historical crash" not in str(data["details"].get("fatal_log_tail", []))
+    else:
+        assert data["result"]["status"] == "closed"
+        assert "fatal_log_tail" not in data["result"]["shutdown_evidence"]
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows process handle contract")
 def test_editor_process_exit_probe_preserves_exit_code_after_process_exit():
     from cli_anything.unreal.core.editor_lifecycle import _EditorProcessExitProbe
@@ -1270,7 +1330,7 @@ def test_editor_close_recovers_unique_live_port_before_reporting_offline():
     assert scan_status.call_args.args[1] == "30010-30020"
     assert scan_status.call_args.kwargs == {"include_bridge_status": False}
     offline_api.exec_console.assert_not_called()
-    live_api.exec_console.assert_called_once_with("QUIT_EDITOR", timeout=1)
+    live_api.exec_console.assert_called_once_with("CLOSE_SLATE_MAINFRAME", timeout=1)
     data = json.loads(result.output)
     assert data["result"]["status"] == "closed"
     assert data["result"]["port"] == 30011
@@ -1328,7 +1388,7 @@ def test_editor_close_without_project_kills_surviving_port_owner():
         ])
 
     assert result.exit_code == 0, result.output
-    api.exec_console.assert_called_once_with("QUIT_EDITOR", timeout=1)
+    api.exec_console.assert_called_once_with("CLOSE_SLATE_MAINFRAME", timeout=1)
     kill_process.assert_called_once_with(180812)
     data = json.loads(result.output)
     assert data["result"]["status"] == "closed"
@@ -1549,7 +1609,7 @@ def test_editor_close_kills_matching_project_process_after_graceful_timeout(mini
 
     assert result.exit_code == 0, result.output
     mock_api.call_function.assert_not_called()
-    mock_api.exec_console.assert_called_once_with("QUIT_EDITOR", timeout=1)
+    mock_api.exec_console.assert_called_once_with("CLOSE_SLATE_MAINFRAME", timeout=1)
     kill_process.assert_called_once_with(1234)
     data = json.loads(result.output)
     assert data["status"] == "success"
@@ -1580,7 +1640,7 @@ def test_editor_close_waits_for_process_exit_after_api_closes(mini_project):
         ])
 
     assert result.exit_code == 0, result.output
-    mock_api.exec_console.assert_called_once_with("QUIT_EDITOR", timeout=1)
+    mock_api.exec_console.assert_called_once_with("CLOSE_SLATE_MAINFRAME", timeout=1)
     mock_wait.assert_called_once()
     assert mock_wait.call_args.args == (mini_project, 30010)
     assert mock_wait.call_args.kwargs["timeout"] == 10
@@ -2171,7 +2231,7 @@ def test_editor_close_save_dirty_is_explicit(mini_project):
     assert data["save_evidence"]["saved_count"] == 1
     assert data["save_evidence"]["content_packages"] == ["/Game/M_Unsaved"]
     assert data["save_evidence"]["policy"] == "save_then_close"
-    api.exec_console.assert_called_once_with("QUIT_EDITOR", timeout=1)
+    api.exec_console.assert_called_once_with("CLOSE_SLATE_MAINFRAME", timeout=1)
     assert api.call_function.call_args_list[-1].args[1] == "SaveDirtyPackages"
 
 
@@ -2318,7 +2378,7 @@ def test_editor_close_force_is_explicit_and_skips_dirty_query(mini_project):
 
     assert result.exit_code == 0, result.output
     api.call_function.assert_not_called()
-    api.exec_console.assert_called_once_with("QUIT_EDITOR", timeout=1)
+    api.exec_console.assert_called_once_with("CLOSE_SLATE_MAINFRAME", timeout=1)
 
 
 def test_editor_close_offline_process_requires_discard_authorization(mini_project):

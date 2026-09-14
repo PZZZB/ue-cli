@@ -687,6 +687,24 @@ def collect_editor_disconnect_diagnostics(context: dict) -> dict:
     return details
 
 
+def verify_editor_shutdown(context: dict, *, forced: bool = False) -> dict:
+    """Reject a shutdown crash even when process disappearance was confirmed."""
+    from cli_anything.unreal.errors import UeCliError
+
+    details = collect_editor_disconnect_diagnostics(context)
+    exit_code = details.get("process_exit_code")
+    if details.get("fatal_log_tail") or (
+        isinstance(exit_code, int) and exit_code != 0 and not forced
+    ):
+        raise UeCliError(
+            "EDITOR_CLOSE_CRASHED",
+            "Editor exited abnormally during shutdown; a clean close was not verified.",
+            exit_code=3,
+            details={**details, "stage": "editor_shutdown"},
+        )
+    return details
+
+
 def close_editor_disconnect_context(context: dict) -> None:
     probe = context.get("process_probe")
     if probe is not None:

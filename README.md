@@ -93,6 +93,8 @@ ue-cli --output json task wait <task_id> --timeout 300
 
 `task wait` exits 0 for a completed task, 3 for a failed/task-timeout result, and 4 for cancellation or caller wait timeout. A caller timeout never cancels the task; output keeps the current task status and adds `wait.status=timeout` plus a follow-up command.
 
+`build cook` skips UAT package preparation, so cook-only runs do not require a Game target receipt. If UAT reports a missing staging receipt, failure details retain `completed_phases: ["cook"]` only when the log explicitly confirms Cook completed; the overall operation remains failed.
+
 For running `build cook` and `build package` tasks, `task status` inspects a bounded log suffix for Unreal's explicit `Cooker has been blocked from saving ...` warning. It keeps `status=running`, reports `stalled` plus a structured `diagnostic` with duration, package/object names, log path, and a user-controlled cancellation command. Default stall threshold is 600 seconds; set `UE_CLI_COOK_STALL_THRESHOLD_SECONDS` to override it. ue-cli never auto-cancels the task.
 
 `build package --uat-arg` appends one argument to UAT `BuildCookRun`; it does

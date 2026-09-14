@@ -468,6 +468,20 @@ def _build_failure_diagnostics(
         return {}
 
     lines = [line.strip() for line in text.splitlines() if line.strip()]
+    missing_receipts = [
+        line for line in lines if "Stage Failed. Missing receipt '" in line
+    ]
+    if missing_receipts:
+        cook_completed = "********** COOK COMMAND COMPLETED **********" in lines
+        return {
+            "failure_kind": "missing_staging_receipt",
+            "diagnostics": list(dict.fromkeys(missing_receipts))[-20:],
+            "completed_phases": ["cook"] if cook_completed else [],
+            "error": (
+                "Cook completed, but UAT failed while preparing staging receipts. "
+                if cook_completed else "UAT failed while preparing staging receipts. "
+            ) + "See log_file for details.",
+        }
     gradle_loopback_lines = [
         line for line in lines if _GRADLE_LOOPBACK_FAILURE_PATTERN.search(line)
     ]
@@ -1492,6 +1506,9 @@ def cook_content(
         f"-platform={platform}",
         "-cook",
         "-noP4",
+        # UAT Package prepares deployment contexts even without -package.
+        # Skip it explicitly so cook-only runs do not require Game receipts.
+        "-skippackage",
     ]
     if packages:
         args.append(

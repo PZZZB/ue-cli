@@ -1535,6 +1535,29 @@ class TestBuildSuccessPaths:
             assert result["log_file"].endswith("cli_cook.log")
             assert "-utf8output" not in mock_run.call_args.args[2]
             assert "-allmaps" in mock_run.call_args.args[2]
+            assert "-skippackage" in mock_run.call_args.args[2]
+
+    @pytest.mark.parametrize("cook_completed", [True, False])
+    def test_missing_staging_receipt_preserves_cook_evidence(self, tmp_path, cook_completed):
+        from cli_anything.unreal.core.build import _normalize_result
+
+        log_file = tmp_path / "cook.log"
+        receipt_error = "Stage Failed. Missing receipt 'Test.target'. Check that this target has been built."
+        log_file.write_text(
+            "LogInit: Display: Success - 0 error(s), 0 warning(s)\n"
+            + ("********** COOK COMMAND COMPLETED **********\n" if cook_completed else "")
+            + receipt_error + "\nAutomationTool exiting with ExitCode=103\n",
+            encoding="utf-8",
+        )
+
+        result = _normalize_result({"returncode": 103, "log_file": str(log_file)}, "Cook")
+
+        assert result["status"] == "error"
+        assert result["returncode"] == 103
+        assert result["failure_kind"] == "missing_staging_receipt"
+        assert result["completed_phases"] == (["cook"] if cook_completed else [])
+        assert result["diagnostics"] == [receipt_error]
+        assert ("Cook completed" in result["error"]) is cook_completed
 
     def test_cook_native_options(self, temp_project):
         """Targeted cook inputs must reach their native UAT/Cooker options."""
@@ -1569,6 +1592,7 @@ class TestBuildSuccessPaths:
 
         uat_args = mock_run.call_args.args[2]
         assert "-allmaps" not in uat_args
+        assert "-skippackage" in uat_args
         assert (
             "-AdditionalCookerOptions=-Package=/Game/Foo/A+/Game/Foo/B"
             in uat_args

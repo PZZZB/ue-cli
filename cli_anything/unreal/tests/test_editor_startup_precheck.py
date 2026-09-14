@@ -47,6 +47,16 @@ def mini_project(tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_synthetic_close_process_identities(request, monkeypatch):
+    """Fake editor PIDs must not resolve to unrelated Windows processes."""
+    if "editor_close" in request.node.name or "kill_matching_project_editors" in request.node.name:
+        monkeypatch.setattr(
+            "cli_anything.unreal.utils.ue_backend._windows_process_identity",
+            lambda _pid: {"query_ok": True, "found": False},
+        )
+
+
+@pytest.fixture(autouse=True)
 def _clean_dirty_state_for_existing_close_tests(request, monkeypatch):
     """Legacy close lifecycle tests operate on an explicitly clean editor."""
 

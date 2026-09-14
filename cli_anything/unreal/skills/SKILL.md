@@ -1,4 +1,4 @@
----
+﻿---
 name: ue-cli
 description: |
   Control Unreal Engine 4.26 and 5.x editors via `ue-cli`.

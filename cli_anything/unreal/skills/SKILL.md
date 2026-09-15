@@ -1,14 +1,11 @@
 ﻿---
 name: ue-cli
-description: |
-  Control Unreal Engine 4.26 and 5.x editors via `ue-cli`.
-  Use whenever user wants Unreal Engine work: launch editor, materials, scenes/actors,
-  blueprints, screenshots, RenderDoc GPU frames, build/cook/package, or run
-  Python inside editor.
-  TRIGGER on Unreal Engine, UE4, UE5, UE editor, materials, blueprints, levels,
-  actors, meshes, shaders, HLSL, RenderDoc, GPU frame capture, .rdc, .uproject,
-  cook, compile, /Game/... asset paths, or Chinese: 虚幻引擎, 材质, 蓝图, 关卡,
-  场景, 编译, 打包, 截图, 截帧.
+description: >
+  Control Unreal Engine 4.26 and 5.x through ue-cli: editor lifecycle, assets,
+  materials, actors, blueprints, editor Python, screenshots, frame capture,
+  and build/cook/package. Use for operations on an Unreal project or editor;
+  use dedicated tools for offline RenderDoc analysis or general source-code edits.
+  Chinese: 虚幻引擎, 材质, 蓝图, 关卡, 场景, 编译, 打包, 截图, 截帧.
 ---
 
 # Unreal Engine CLI Skill
@@ -23,7 +20,7 @@ Verify install first: `ue-cli --version`.
 1. **Overview**: `editor api-discover ClassName` -> property/function names.
 2. **Detail**: `editor api-discover ClassName -d Prop1,Func2` -> tooltips, categories, param/return types, read/write.
 
-**CLI is the interface to Unreal Engine.** All engine ops go through `ue-cli` subcommands or `editor run-script`. Direct file writes bypass locks/ref tracking and corrupt assets. Read `references/safety.md` before destructive work.
+**Use CLI for engine operations.** Prefer `ue-cli` subcommands or `editor run-script`. For startup recovery UI, follow [the recovery rule](references/safety.md#restore-packages-after-an-agent-managed-restart). Read `references/safety.md` before destructive work.
 
 **Prefer subcommands; fall back fast to `editor run-script`.** `references/commands.md` is complete. If command not listed, stop searching variants; write UE Python and run it. That is intended escape hatch.
 
@@ -36,16 +33,15 @@ Verify install first: `ue-cli --version`.
 - **JSON by default.** Non-TTY callers get JSON. To force it, `--output json` is top-level and must appear before subcommand:
   - OK: `ue-cli --output json editor launch`
   - Bad: `ue-cli editor launch --output json`
-- **Runner output contract.** JSON mode stdout = one final payload. Progress/heartbeats -> stderr. Do not stream stdout live then replay captured stdout, or JSON duplicates.
+- **Runner output contract.** `--no-save` disables automatic dirty-package saving, not script side effects. JSON mode stdout = one final payload. Progress/heartbeats -> stderr. Do not stream stdout live then replay captured stdout, or JSON duplicates.
 - **Long-running caller contract.** A tool result with `session_id` but no `exit_code` is a yield, not command completion; keep polling that session until process exit and the final JSON. Do not start status/stop recovery merely because a synchronous command yielded partial or empty output.
 - **Build log visibility.** Synchronous `build compile` / `build cook` / `build package` stream live UAT/UBT log text to stderr while preserving final JSON on stdout. Repeated MSVC command-line warnings are folded in the live stream; `log_file` keeps every original line.
 - **Compile the full Editor target for real validation.** On Win64, run `build compile` without `--module`; the detected `<Project>Editor` target and its dependency set may produce a large build, which is expected. Never substitute a Game, plugin, or other isolated module merely to reduce compile volume. Use `--module` only for an explicitly requested focused diagnostic, then run the full Editor target before launch or reporting success. See `references/commands.md` "build - Build System".
-- **Discover editors with `editor status`.** Project-scoped status accepts either top-level `ue-cli --project PATH editor status` or subcommand `ue-cli editor status --project PATH`; use `editor status --all` to list other projects too. Result array items: `status`, `pid`, `port`, `project_path`. Online items include `bridge_version`, `bundled_version`, `plugin_match` (`true`/`false`/`null` when probe is busy). A mismatch enters `remote_control_only` mode: `editor run-script --no-save` remains available without restart, while `upgrade_command` is needed only for bridge-backed commands. `--no-save` disables ue-cli's automatic dirty-package save; it does not sandbox script side effects. `unreachable` means the editor process is alive but Remote Control may be temporarily busy during PIE/loading; retry the reported status command instead of relaunching. `offline` with `next_command` appears only after stale grace or clear failure. Build commands need a project.
+- **Discover editors with `editor status`.** Scope with `--project PATH`; use `editor status --all` for other projects. Poll temporary `unreachable` or `launching` states. For bridge capabilities, restart decisions, and response fields, read [Editor Lifecycle](references/workflows-editor.md#editor-lifecycle---required-flow). Build commands also need project context.
 - **Use UE virtual paths** (`/Game/MyAsset`) for engine assets, not OS `.uasset` paths.
 - **Multiline Python.** Use `editor run-script -` with stdin for multiline snippets, especially in PowerShell; keep `-c` for one-liners and file paths for reusable scripts.
-- **Use `editor launch` for normal startup.** It launches an interactive editor by default so UE confirmation dialogs remain usable. Pass `--unattended` only when dialogs must be suppressed; `--no-unattended` explicitly selects the interactive default. The command waits up to 30 seconds for the API, then returns a pollable `launching` task if startup is still in progress. `--timeout` controls the background startup deadline, not how long the caller must stay attached. For async: `--no-wait`, then poll `editor status <task_id>` or `task status <task_id>`. Use explicit `--no-remote` only when a basic editor process is sufficient: it skips Remote Control/bridge setup, reports `launched` rather than `online`, and cannot verify readiness or the requested map.
-- **Actively poll confirmations during agent-owned editor work.** After the editor is online, run `confirmation enable --ttl 900` before destructive, replace/import/save, plugin, or other long operations that may prompt; refresh it before another risky operation. If an editor command returns `EDITOR_BLOCKED_BY_CONFIRMATION` or `EDITOR_BLOCKED_BY_DIALOG`, or times out while the process remains alive, do not retry or kill the editor by default. Run the reported `confirmation list`; answer only items with `source=bridge` and `answerable=true` using an exact reported choice. A `source=window` item needs editor UI. If closing the editor is the requested outcome and discarding state is explicitly authorized, `editor close --force` may terminate the verified project-matched process without clicking that window. Run `confirmation disable` before handing the editor back to a human. See `references/workflows-editor.md` "Active Confirmation Polling".
-- **Zombie handling.** `editor launch` kills stale `UnrealEditor.exe` only after status grace or when no active launch task owns it. Temporary `unreachable`/`launching` states should be polled, not killed. Only API-alive `ALREADY_RUNNING` blocks launch.
+- **Use `editor launch` for normal startup.** Keep the interactive default. After 30 seconds, startup may return a pollable task; `--timeout` remains its background deadline. See [Editor Lifecycle](references/workflows-editor.md#editor-lifecycle---required-flow) for async, `--unattended`, and `--no-remote` choices.
+- **Handle confirmations before retrying.** For agent-owned editor work that may prompt, follow [Active Confirmation Polling](references/workflows-editor.md#active-confirmation-polling). On `EDITOR_BLOCKED_BY_CONFIRMATION`, `EDITOR_BLOCKED_BY_DIALOG`, or an unreachable live process, inspect confirmations before retrying or terminating it. Restore Packages follows [the recovery rule](references/safety.md#restore-packages-after-an-agent-managed-restart).
 - **Clean temp files** after temporary Python scripts/output.
 - **Protect context.** Large commands (`blueprint info`, `api-discover`) can flood. Redirect to temp JSON and parse, or use targeted commands (`scene property`).
 
@@ -82,6 +78,6 @@ If submission fails, report the reason. After reporting the Issue URL or submiss
 | Capture RenderDoc frame, debug shaders/draw calls | `references/workflows-editor.md` "RenderDoc Frame Capture" |
 | Edit materials, HLSL, shader inspection | `references/workflows-materials.md` |
 | Manipulate assets, scenes, blueprints | `references/workflows-assets-scenes.md` |
-| Delete/overwrite assets; destructive ops | `references/safety.md` |
+| Delete/overwrite assets; destructive ops; Restore Packages | `references/safety.md` |
 
 Read relevant file before acting. Do not guess commands/workflows from memory.

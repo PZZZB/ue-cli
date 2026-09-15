@@ -118,9 +118,9 @@ Call `confirmation list` in these cases:
 - A destructive, overwrite, import, save, plugin, map-transition, or long-running operation has not produced expected progress.
 - Before retrying a command with unknown delivery, closing the editor, or declaring the editor hung.
 
-The lease must be enabled before the dialog occurs. Bridge interception covers standard `FMessageDialog` calls after the bridge installs its post-engine-init hook. Startup recovery, custom Slate windows, platform file pickers, and third-party dialogs may appear as `source=window`, `answerable=false`; inspect those in editor UI. If closing is the requested outcome and discarding state is explicitly authorized, `editor close --force` may terminate verified processes matching the selected project without answering the window. Never auto-click **Restore Packages**. A lease expiry or `confirmation disable` removes hidden interception and sends the unresolved standard dialog to normal editor UI.
+The lease must be enabled before the dialog occurs. Bridge interception covers standard `FMessageDialog` calls after the bridge installs its post-engine-init hook. Startup recovery, custom Slate windows, platform file pickers, and third-party dialogs may appear as `source=window`, `answerable=false`; inspect those in editor UI. If closing is the requested outcome and discarding state is explicitly authorized, `editor close --force` may terminate verified processes matching the selected project without answering the window. For **Restore Packages** after a session the Agent started and closed, follow [the startup-recovery rule](safety.md#restore-packages-after-an-agent-managed-restart) to handle the window without repeating an already authorized recovery or discard decision. A lease expiry or `confirmation disable` removes hidden interception and sends the unresolved standard dialog to normal editor UI.
 
-The command that triggered a brokered dialog may already have executed side effects before asking. After answering, verify editor/project state before retrying it.
+Inspect the title, message, and choices; answer according to the task's existing authorization, without blindly choosing `yes`. The triggering command may already have executed side effects. After answering, verify editor/project state before retrying it.
 
 ## Python Scripting Patterns
 

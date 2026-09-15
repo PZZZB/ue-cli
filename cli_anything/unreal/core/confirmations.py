@@ -384,7 +384,12 @@ def answer_confirmation(
             "CONFIRMATION_NOT_ANSWERABLE",
             "This item is a detected editor window, not a brokered FMessageDialog.",
             exit_code=3,
-            suggestion="Inspect the window in the editor; do not auto-click recovery or third-party dialogs.",
+            suggestion=(
+                "Inspect the window in the editor. For Restore Packages after a session "
+                "the Agent started and closed, verify the project, window, and packages, "
+                "then use UI automation according to the existing recovery or discard decision. "
+                "Ask if ownership or the choice is unclear; do not auto-click third-party dialogs."
+            ),
         )
     if CONFIRMATION_ID_PATTERN.fullmatch(confirmation_id) is None:
         raise UeCliError(

@@ -17,7 +17,7 @@ Benchmark failures: locks, corruption, modal dialogs, wasted turns.
 | `LevelEditorSubsystem.new_level`, `EditorLoadingAndSavingUtils.new_blank_map`/`load_map`, or `save_current_level` in Python | `editor new-blank-level`, `editor new-level`, `editor open-level`, or `editor save-level`; if `open-level` rejects an already-loaded target World, close and use `editor launch --map` | UE world transition / HTTP tick-thread crash risk |
 | Probe `StaticMeshDescription.get_vertex_instance_uv(...)` until Python raises | Query `StaticMeshEditorSubsystem.get_num_uv_channels()` on UE5 or `EditorStaticMeshLibrary.get_num_uv_channels()` on UE4.26, then bounds-check | Native out-of-range `check()` can terminate Editor; `--no-save` is not a sandbox |
 
-**General rule:** all UE ops through CLI. Direct file manipulation bypasses locks/reference tracking.
+**General rule:** use CLI for UE operations, except the scoped startup-recovery UI handling below. Direct file manipulation bypasses locks/reference tracking.
 
 ## Modal Dialogs Block CLI Execution
 
@@ -31,7 +31,13 @@ Any modal dialog can block Remote Control. For agent-owned interactive work, arm
 | `create_asset()` / `duplicate_asset()` target exists | Use overwrite workflow below |
 | Any `unreal.EditorDialog` call | Never use in headless scripts |
 
-When an editor command returns `EDITOR_BLOCKED_BY_CONFIRMATION`, run its `next_command`, inspect title/message/choices, and answer only an authorized `source=bridge`, `answerable=true` item. Do not blindly choose `yes` or repeat the triggering operation: side effects may have happened before the dialog. `EDITOR_BLOCKED_BY_DIALOG` means CLI answering is unavailable; inspect the existing editor window. If closing is the requested outcome and discarding state is explicitly authorized, `editor close --force` may terminate verified processes matching the selected project without answering the window. Never auto-click **Restore Packages**. When package recovery loss is explicitly authorized before launch, `editor launch --skip-restore` uses Unreal's native decline path without UI automation or global unattended mode.
+For confirmation commands, leases, and blocked-window handling, follow [Active Confirmation Polling](workflows-editor.md#active-confirmation-polling). Check the resulting editor state before retrying an operation: side effects may already have occurred.
+
+### Restore Packages after an agent-managed restart
+
+If the Agent started and closed the previous editor session, it may handle **Restore Packages** on the next launch without asking again. Verify the project and current PID/window against the launch record, and inspect the listed packages. Restore needed unsaved work with **Restore Selected**; choose **Skip Restore** only when the task already permits discarding that recovery data. Starting and closing the editor alone does not authorize discarding user changes. Ask only when ownership or the intended choice is unclear, and honor earlier recovery or discard instructions.
+
+When discarding recovery is already authorized before launch, prefer `editor launch --skip-restore`, which uses Unreal's native decline path. For an existing recovery window, use UI automation; `confirmation answer` cannot answer `source=window`, `answerable=false` items. Then poll the existing launch task and verify readiness. Keep normal startup interactive: `--unattended` suppresses dialogs and cannot select a recovery action.
 
 ## Asset Overwrite Avoidance
 

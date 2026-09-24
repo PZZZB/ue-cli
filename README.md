@@ -249,6 +249,14 @@ Top-level map transitions through `EditorLoadingAndSavingUtils.new_blank_map`, `
 `editor exec --timeout <seconds>` waits 15 seconds by default and never redispatches a command after an ambiguous transport failure. When the project log is available, a timeout creates a read-only observation task from the command's unique begin/end log markers. `EDITOR_EXEC_IN_PROGRESS` confirms delivery and includes a `task_id`; `EDITOR_EXEC_DELIVERY_UNKNOWN` can also include that handle while delivery evidence is still pending. Poll with `ue-cli task status <task_id>` or `ue-cli task wait <task_id> --timeout <seconds>` without resending the command. The observation task reports terminal Unreal Python errors and cannot be cancelled because cancellation could not safely stop the already-dispatched editor command. Without a usable project log, delivery remains unknown; inspect editor state and logs before retrying because a non-idempotent command may already have run. Inline command logs are bounded; `omitted_line_count` reports omitted lines and `log_file` retains complete diagnostics. Marker-delimited file capture waits for the matching end marker within `--log-wait`, so a briefly delayed log flush does not produce false empty output. `Automation RunTests` waits up to 300 seconds by default for `Automation Test Queue Empty`; pass `--log-wait <seconds>` to override that bound. Other console commands retain the 1-second log-capture default. Automation commands lower Unreal's runtime-only interactive-FPS gate to 1 FPS without saving project configuration, so background agent runs do not require human window focus. Engines such as UE4.26 that do not expose this setting still dispatch the Automation command without the runtime FPS override.
 On Windows UE5, `editor live-coding-compile` invokes Unreal's synchronous `LiveCoding.CompileSync`, waits for `success`, `no_changes`, `failed`, or `cancelled`, and returns that terminal state. A timeout remains unknown and is never retried. Editor exits include PID and bounded fatal-log evidence when available. UE4 returns `LIVECODING_SYNC_UNSUPPORTED` before dispatch because UE4.26 has no synchronous Live Coding result API.
 
+On engines whose Remote Control settings declare `bAllowAnyRemoteFunctionCall`,
+`preflight` checks that permission as well. `editor enable-remote` and controlled
+`editor launch` set it to `True` in the RemoteControlSettings section and require
+an editor restart for the setting to take effect. This permits arbitrary remote
+UObject calls, including Python and bridge calls; a two-library allowlist would
+not cover the CLI's actor/component and generic function commands. Engines without
+this setting (including stock UE4.26 and UE5.7) retain their existing configuration.
+
 ## Multiple Editors
 
 Discover all running instances:

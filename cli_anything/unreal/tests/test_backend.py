@@ -1922,3 +1922,49 @@ class TestHTTPAPIAssets:
 # ═══════════════════════════════════════════════════════════════════════
 
 
+
+@pytest.mark.parametrize('initial', ['', 'bAllowAnyRemoteFunctionCall=False\n', ';bAllowAnyRemoteFunctionCall=True\n', '[Other]\nbAllowAnyRemoteFunctionCall=True\n'])
+def test_remote_function_permission_detects_and_repairs_gate(tmp_path, initial):
+    from cli_anything.unreal.utils.ue_backend import (
+        check_remote_control_config, ensure_remote_control_config,
+    )
+
+    project = tmp_path / 'Project'
+    _write_remote_control_project(project, remote_enabled=True)
+    config = project / 'Config/DefaultRemoteControl.ini'
+    config.write_text(config.read_text() + initial, encoding='utf-8')
+    engine = tmp_path / 'EngineRoot'
+    plugin = engine / 'Engine/Plugins/VirtualProduction/RemoteControl'
+    plugin.mkdir(parents=True)
+    (plugin / 'RemoteControl.uplugin').write_text('{}')
+    header = plugin / 'Source/RemoteControlCommon/Public/RemoteControlSettings.h'
+    header.parent.mkdir(parents=True)
+    header.write_text('bool bAllowAnyRemoteFunctionCall = false;')
+    before = config.read_bytes()
+    result = check_remote_control_config(str(project), engine_root=str(engine))
+    assert not result['configured']
+    assert any('restricts Remote Control function calls' in issue for issue in result['issues'])
+    assert config.read_bytes() == before
+    with patch('cli_anything.unreal.utils.ue_backend._check_plugin_loadable', return_value={'available': True}):
+        repaired = ensure_remote_control_config(str(project), engine_root=str(engine))
+        assert repaired['status'] == 'updated'
+        assert check_remote_control_config(str(project), engine_root=str(engine))['configured']
+        after = config.read_bytes()
+        assert ensure_remote_control_config(str(project), engine_root=str(engine))['status'] == 'ok'
+        assert config.read_bytes() == after
+    if '[Other]' in initial:
+        assert '[Other]\nbAllowAnyRemoteFunctionCall=True' in config.read_text()
+
+
+@pytest.mark.parametrize('supported', [False, True])
+def test_remote_function_permission_new_config_and_older_engine(tmp_path, supported):
+    from cli_anything.unreal.utils.ue_backend import ensure_remote_control_config
+
+    project = tmp_path / 'Project'
+    _write_remote_control_project(project, remote_enabled=True)
+    config = project / 'Config/DefaultRemoteControl.ini'
+    config.unlink()
+    with patch('cli_anything.unreal.utils.ue_backend._requires_remote_function_permission', return_value=supported):
+        result = ensure_remote_control_config(str(project))
+    assert result['status'] == 'created'
+    assert ('bAllowAnyRemoteFunctionCall=True' in config.read_text()) is supported

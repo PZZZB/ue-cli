@@ -1776,6 +1776,27 @@ def _check_plugin_loadable(
     }
 
 
+def _requires_remote_function_permission(project_dir: str, engine_root: str | None) -> bool:
+    """Detect the function-call gate by capability, including source-engine forks."""
+    descriptor = _find_plugin_descriptor(project_dir, "RemoteControl", engine_root)
+    if descriptor is None:
+        return False
+    header = descriptor.parent / "Source/RemoteControlCommon/Public/RemoteControlSettings.h"
+    try:
+        return "bAllowAnyRemoteFunctionCall" in header.read_text(encoding="utf-8-sig")
+    except OSError:
+        return False
+
+
+def _remote_function_permission_enabled(project_dir: str) -> bool:
+    from cli_anything.unreal.core.project import get_config
+
+    settings = get_config(project_dir, "DefaultRemoteControl.ini").get(
+        _REMOTE_CONTROL_INI_SECTION, {}
+    )
+    return str(settings.get("bAllowAnyRemoteFunctionCall", "")).lower() in ("true", "1")
+
+
 def ensure_remote_control_config(
     project_dir: str,
     engine_root: str | None = None,
@@ -1835,11 +1856,15 @@ def ensure_remote_control_config(
         if _ensure_plugin_enabled(project_dir, plugin_name):
             changes.append(f"Enabled {plugin_name} plugin in .uproject")
 
+    requires_function_permission = _requires_remote_function_permission(project_dir, engine_root)
+
     if not config_file.exists():
         # Create new config
         lines = [f"\n[{_REMOTE_CONTROL_INI_SECTION}]"]
         for key, value in _REMOTE_CONTROL_REQUIRED_SETTINGS.items():
             lines.append(f"{key}={value}")
+        if requires_function_permission:
+            lines.append("bAllowAnyRemoteFunctionCall=True")
         lines.append("")
         config_file.write_text("\n".join(lines), encoding="utf-8")
         changes.append("Created DefaultRemoteControl.ini with all settings")
@@ -1866,7 +1891,13 @@ def ensure_remote_control_config(
 
     if updated:
         config_file.write_text(content, encoding="utf-8")
-        return {"status": "updated", "file": str(config_file), "changes": changes}
+
+    if requires_function_permission and not _remote_function_permission_enabled(project_dir):
+        from cli_anything.unreal.core.project import set_config
+
+        set_config(project_dir, "DefaultRemoteControl.ini", _REMOTE_CONTROL_INI_SECTION,
+                   "bAllowAnyRemoteFunctionCall", "True")
+        changes.append("Enabled bAllowAnyRemoteFunctionCall for CLI UObject function calls")
 
     if changes:
         return {"status": "updated", "file": str(config_file), "changes": changes}
@@ -1876,6 +1907,7 @@ def ensure_remote_control_config(
 def check_remote_control_config(
     project_dir: str,
     editor_binary_prefix: str | None = None,
+    engine_root: str | None = None,
 ) -> dict:
     """Check if Remote Control is properly configured.
 
@@ -1929,6 +1961,15 @@ def check_remote_control_config(
         issues.append(
             "bEnableRemotePythonExecution is not True. "
             "Python script execution will fail."
+        )
+
+    if (_requires_remote_function_permission(project_dir, engine_root)
+            and not _remote_function_permission_enabled(project_dir)):
+        issues.append(
+            "This engine restricts Remote Control function calls. "
+            "bAllowAnyRemoteFunctionCall is not True in RemoteControlSettings; "
+            "CLI Python, bridge, and arbitrary UObject calls may be blocked. "
+            "Run: ue-cli editor enable-remote, then restart the editor."
         )
 
     port = read_rc_port(project_dir, editor_binary_prefix)
@@ -2386,6 +2427,7 @@ def preflight_check(uproject_path: str, engine_root: str | None = None) -> dict:
     rc_check = check_remote_control_config(
         project_dir,
         editor_binary_prefix=editor_binary_prefix,
+        engine_root=engine_root,
     )
     plugin_checks = {
         plugin_name: _check_plugin_loadable(

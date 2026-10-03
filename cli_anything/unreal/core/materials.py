@@ -618,40 +618,22 @@ else:
             "error": "CliAnythingBridgeLibrary is unavailable in this editor",
             "bridge_missing": True,
         }}
-    elif isinstance(mat, unreal.MaterialFunctionInterface):
-        try:
-            loaded_bridge_version = str(bridge.get_plugin_version())
-            loaded_bridge_version_tuple = tuple(int(part) for part in loaded_bridge_version.split("."))
-        except Exception:
-            loaded_bridge_version = None
-            loaded_bridge_version_tuple = ()
-        if loaded_bridge_version_tuple < (1, 33):
+    elif isinstance(mat, (unreal.MaterialFunctionInterface, unreal.MaterialInterface)):
+        if not hasattr(bridge, "get_material_compile_status"):
             result = {{
-                "error": "Loaded Bridge does not support MaterialFunction compile errors. Run 'editor plugin-upgrade', then retry material get-errors.",
-                "code": "MATERIAL_FUNCTION_ERRORS_BRIDGE_UPGRADE_REQUIRED",
-                "loaded_version": loaded_bridge_version,
-                "required_version": "1.33",
+                "error": "Compile status requires Bridge 1.39. Run 'editor plugin-upgrade', then retry material get-errors.",
+                "code": "MATERIAL_ERRORS_BRIDGE_UPGRADE_REQUIRED",
+                "required_version": "1.39",
             }}
         else:
-            errors = list(bridge.get_material_compile_errors(mat))
-            result = {{
-                "errors": errors,
+            import json
+            result = json.loads(bridge.get_material_compile_status(mat))
+            result.update({{
                 "warnings": [],
                 "material": loaded_asset_path,
                 "asset_class": mat.get_class().get_name(),
-                "has_errors": len(errors) > 0,
                 "source": "plugin",
-            }}
-    elif isinstance(mat, unreal.MaterialInterface):
-        errors = list(bridge.get_material_compile_errors(mat))
-        result = {{
-            "errors": errors,
-            "warnings": [],
-            "material": loaded_asset_path,
-            "asset_class": mat.get_class().get_name(),
-            "has_errors": len(errors) > 0,
-            "source": "plugin",
-        }}
+            }})
     else:
         result = {{
             "error": "Unsupported asset class for material get-errors: " + mat.get_class().get_name(),
@@ -764,7 +746,7 @@ def get_material_errors(
         project_dir: Project directory used only for upgrade guidance.
 
     Returns:
-        {"errors": [...], "warnings": [...], "has_errors": bool, "source": "plugin"}
+        Compile errors, checked platform, per-quality resources, and nullable verdicts
         or {"error": "..."} if plugin not available.
     """
     result = _exec_material_script(
@@ -774,6 +756,31 @@ def get_material_errors(
         save_policy=SavePolicy.NEVER,
         material_path=material_path,
     )
+
+    if "error" not in result:
+        resources = result.get("resources", [])
+        for resource in resources:
+            if not resource.get("resource_present"):
+                state = "resource_absent"
+            elif not resource.get("compilation_finished"):
+                state = "not_finished"
+            elif resource.get("errors"):
+                state = "errors"
+            elif resource.get("shader_map_valid"):
+                state = "complete"
+            else:
+                state = "shader_map_unavailable"
+            resource["compile_state"] = state
+        result["compilation_complete"] = bool(resources) and all(
+            r["compile_state"] in ("complete", "errors") for r in resources
+        )
+        errors = result.get("errors", [])
+        result["has_errors"] = True if errors else (
+            False if result["compilation_complete"] else None
+        )
+        result["compile_succeeded"] = (
+            not bool(errors) if result["compilation_complete"] else None
+        )
 
     if result.get("bridge_missing") is True:
         plugin_dir = f"{project_dir}/Plugins/CliAnythingBridge" if project_dir else "<project>/Plugins/CliAnythingBridge"

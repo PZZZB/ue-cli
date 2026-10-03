@@ -1739,7 +1739,7 @@ class TestMaterialEditing:
 
         script = mock_run.call_args.args[1]
         assert "_cli_load_material" in script
-        assert "bridge.get_material_compile_errors(mat)" in script
+        assert "bridge.get_material_compile_status(mat)" in script
         assert '"material": loaded_asset_path' in script
 
     @patch("cli_anything.unreal.core.materials.ensure_plugin_deployed")
@@ -2037,6 +2037,7 @@ class TestMaterialErrorsPlugin:
 
         mock_deploy.return_value = {"deployed": True, "action": "already_up_to_date"}
         mock_exec.return_value = {
+            "resources": [{"resource_present": True, "compilation_finished": True, "shader_map_valid": True}],
             "errors": [],
             "warnings": [],
             "material": "/Game/M_Clean",
@@ -2095,5 +2096,79 @@ class TestMaterialErrorsPlugin:
         assert result["source"] == "plugin"
         mock_deploy.assert_not_called()
 
+@pytest.mark.parametrize(
+    "resource, state, complete, succeeded, has_errors",
+    [
+        ({"resource_present": False}, "resource_absent", False, None, None),
+        ({"resource_present": True, "compilation_finished": False,
+          "shader_map_valid": True}, "not_finished", False, None, None),
+        ({"resource_present": True, "compilation_finished": True,
+          "shader_map_valid": False}, "shader_map_unavailable", False, None, None),
+        ({"resource_present": True, "compilation_finished": False,
+          "shader_map_valid": False, "errors": ["bad shader"]},
+         "not_finished", False, None, True),
+        ({"resource_present": True, "compilation_finished": True,
+          "shader_map_valid": True}, "complete", True, True, False),
+        ({"resource_present": True, "compilation_finished": True,
+          "shader_map_valid": False, "errors": ["bad shader"]},
+         "errors", True, False, True),
+    ],
+)
+def test_compile_resource_verdict(resource, state, complete, succeeded, has_errors):
+    from cli_anything.unreal.core.materials import get_material_errors
+
+    evidence = {"resources": [resource], "errors": resource.get("errors", []),
+                "checked_platform": "VULKAN_ES3_1_ANDROID_Preview"}
+    with patch("cli_anything.unreal.core.materials._exec_material_script", return_value=evidence):
+        result = get_material_errors(MagicMock(), "/Game/M_Test")
+    assert result["resources"][0]["compile_state"] == state
+    assert result["compilation_complete"] is complete
+    assert result["compile_succeeded"] is succeeded
+    assert result["has_errors"] is has_errors
+    assert result["checked_platform"] == "VULKAN_ES3_1_ANDROID_Preview"
 
 
+def test_compile_empty_resources_never_certify_success():
+    from cli_anything.unreal.core.materials import get_material_errors
+
+    with patch("cli_anything.unreal.core.materials._exec_material_script", return_value={"errors": []}):
+        result = get_material_errors(MagicMock(), "/Game/M_Test")
+    assert result["compilation_complete"] is False
+    assert result["compile_succeeded"] is None
+    assert result["has_errors"] is None
+
+
+def test_compile_mixed_resources_remain_unknown_with_observed_errors():
+    from cli_anything.unreal.core.materials import get_material_errors
+
+    evidence = {"errors": ["bad shader"], "resources": [
+        {"resource_present": True, "compilation_finished": True, "errors": ["bad shader"]},
+        {"resource_present": False},
+    ]}
+    with patch("cli_anything.unreal.core.materials._exec_material_script", return_value=evidence):
+        result = get_material_errors(MagicMock(), "/Game/M_Test")
+    assert result["has_errors"] is True
+    assert result["compile_succeeded"] is None
+    assert result["compilation_complete"] is False
+
+
+def test_compile_status_script_rejects_legacy_bridge():
+    import types
+    from cli_anything.unreal.core.materials import _PLUGIN_GET_ERRORS_SCRIPT
+
+    class Material:
+        pass
+
+    mat = Material()
+    fake_unreal = types.SimpleNamespace(
+        MaterialInterface=Material, MaterialFunctionInterface=type("Function", (), {}),
+        CliAnythingBridgeLibrary=types.SimpleNamespace(),
+    )
+    namespace = {"_cli_load_material": lambda *args: (mat, "/Game/M_Test", [])}
+    script = _PLUGIN_GET_ERRORS_SCRIPT.format(
+        material_path="/Game/M_Test", material_path_candidates_json="[]"
+    )
+    with patch.dict("sys.modules", {"unreal": fake_unreal}):
+        exec(script, namespace)
+    assert namespace["result"]["code"] == "MATERIAL_ERRORS_BRIDGE_UPGRADE_REQUIRED"
+    assert namespace["result"]["required_version"] == "1.39"

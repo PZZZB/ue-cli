@@ -26,6 +26,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "CliAnything")
 	static TArray<FString> GetMaterialCompileErrors(UObject* Asset);
 
+	/** Base-material compile evidence for the active UE5 platform (host RHI on UE4). */
+	UFUNCTION(BlueprintCallable, Category = "CliAnything")
+	static FString GetMaterialCompileStatus(UObject* Asset);
+
 	/** Returns Material, MaterialFunction, or MaterialInstance details as JSON. */
 	UFUNCTION(BlueprintCallable, Category = "CliAnything")
 	static FString GetMaterialInfo(UObject* Asset);

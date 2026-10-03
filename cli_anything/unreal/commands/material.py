@@ -101,7 +101,7 @@ def material_stats(state: AppState, material_path):
 @handle_error
 @click.pass_obj
 def material_errors(state: AppState, material_path):
-    """Check material for compilation errors."""
+    """Read base-material errors and compile readiness (active UE5 preview; UE4 host RHI)."""
     from cli_anything.unreal.core.materials import get_material_errors
 
     api = require_editor(state)

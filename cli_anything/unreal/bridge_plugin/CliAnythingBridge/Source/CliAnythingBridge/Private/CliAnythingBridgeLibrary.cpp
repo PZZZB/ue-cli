@@ -310,6 +310,57 @@ TArray<FString> UCliAnythingBridgeLibrary::GetMaterialCompileErrors(UObject* Ass
 	return Result;
 }
 
+FString UCliAnythingBridgeLibrary::GetMaterialCompileStatus(UObject* Asset)
+{
+	UMaterialInterface* Material = Cast<UMaterialInterface>(Asset);
+	if (!Material)
+	{
+		if (UMaterialFunctionInterface* Function = Cast<UMaterialFunctionInterface>(Asset))
+		{
+			Material = Function->GetPreviewMaterial();
+		}
+	}
+	if (!Material || !Material->GetMaterial()) return JsonError(TEXT("Material resource owner is unavailable"));
+
+	// Preserve the base-material scope of GetMaterialCompileErrors, and expose it.
+	UMaterial* BaseMaterial = Material->GetMaterial();
+#if ENGINE_MAJOR_VERSION >= 5
+	const EShaderPlatform Platform = GEditor ? GEditor->GetActiveShaderPlatform() : GMaxRHIShaderPlatform;
+	const FString PlatformName = FDataDrivenShaderPlatformInfo::GetName(Platform).ToString();
+	const TCHAR* PlatformSource = TEXT("active_editor");
+#else
+	const EShaderPlatform Platform = GMaxRHIShaderPlatform;
+	const FString PlatformName = LegacyShaderPlatformToShaderFormat(Platform).ToString();
+	const TCHAR* PlatformSource = TEXT("host_rhi");
+#endif
+	FString Json = TEXT("{\"checked_platform\":\"") + JsonEscape(PlatformName) + TEXT("\"");
+	Json += TEXT(",\"platform_source\":\"") + FString(PlatformSource) + TEXT("\"");
+	Json += TEXT(",\"resource_scope\":\"base_material\",\"resource_material\":\"") + JsonEscape(BaseMaterial->GetPathName()) + TEXT("\"");
+	Json += TEXT(",\"resources\":[");
+	TArray<FString> Errors;
+	for (int32 Quality = 0; Quality < EMaterialQualityLevel::Num; ++Quality)
+	{
+#if ENGINE_MAJOR_VERSION >= 5
+		const FMaterialResource* Resource = BaseMaterial->GetMaterialResource(Platform, static_cast<EMaterialQualityLevel::Type>(Quality));
+#else
+		const FMaterialResource* Resource = BaseMaterial->GetMaterialResource(GMaxRHIFeatureLevel, static_cast<EMaterialQualityLevel::Type>(Quality));
+#endif
+		if (Quality) Json += TEXT(",");
+		Json += FString::Printf(TEXT("{\"quality_level\":%d,\"resource_present\":%s"), Quality, Resource ? TEXT("true") : TEXT("false"));
+		if (Resource)
+		{
+			const bool bFinished = Resource->IsCompilationFinished();
+			const bool bValid = Resource->HasValidGameThreadShaderMap();
+			Json += FString::Printf(TEXT(",\"compilation_finished\":%s,\"shader_map_valid\":%s"), bFinished ? TEXT("true") : TEXT("false"), bValid ? TEXT("true") : TEXT("false"));
+			Json += TEXT(",\"errors\":") + JsonStringArray(Resource->GetCompileErrors());
+			for (const FString& Error : Resource->GetCompileErrors()) Errors.AddUnique(Error);
+		}
+		Json += TEXT("}");
+	}
+	Json += TEXT("],\"errors\":") + JsonStringArray(Errors) + TEXT("}");
+	return Json;
+}
+
 static FString BuildMaterialGraphJson(
 	UObject* Asset,
 	const TArray<UMaterialExpression*>& Expressions,
@@ -1333,7 +1384,7 @@ TArray<FString> UCliAnythingBridgeLibrary::GetRecentEngineErrors(int32 Count)
 
 FString UCliAnythingBridgeLibrary::GetPluginVersion()
 {
-	return TEXT("1.38");
+	return TEXT("1.39");
 }
 
 FString UCliAnythingBridgeLibrary::ConnectMaterialOutput(UMaterial* Material, const FString& FromNode, const FString& FromOutputName, const FString& PropertyName)

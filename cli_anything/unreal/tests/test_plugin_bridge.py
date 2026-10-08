@@ -687,7 +687,7 @@ class TestPluginBridge:
 
         version = get_bundled_version()
         assert version is not None
-        assert version == "1.39"
+        assert version == "1.40"
 
     def test_static_mesh_lod_property_reader_uses_native_vertex_paint_data(self):
         """Bridge exposes LOD fields omitted from Unreal reflection."""
@@ -962,6 +962,23 @@ class TestPluginBridge:
         refresh = 'HandleRecompileShadersCommand(TEXT("Changed"), *GLog)'
         assert refresh in function
         assert function.index(refresh) < function.index("ExtractResource->CacheShaders")
+
+    def test_shader_exports_preserve_static_permutation_and_preview_platform(self):
+        plugin_dir = Path(__file__).resolve().parents[1] / "bridge_plugin" / "CliAnythingBridge"
+        cpp = (plugin_dir / "Source/CliAnythingBridge/Private/CliAnythingBridgeLibrary.cpp").read_text(encoding="utf-8")
+        hlsl, shaders = cpp.split("TArray<FString> UCliAnythingBridgeLibrary::GetMaterialHLSLCode", 1)[1].split(
+            "TArray<FString> UCliAnythingBridgeLibrary::GetMaterialShaderSource", 1)
+        shaders = shaders.split("// Escape a string", 1)[0]
+        for function in (hlsl, shaders):
+            assert "GEditor->GetActiveShaderPlatform()" in function
+            assert "#if ENGINE_MAJOR_VERSION >= 5" in function
+        assert "Material->GetMaterialResource(Platform)" in hlsl
+        assert "Material->GetMaterialResource(GMaxRHIFeatureLevel)" in hlsl
+        assert "BaseMat" not in hlsl
+        assert "Cast<UMaterialInstance>(Material)" in shaders
+        assert "SetMaterial(BaseMat, Instance, Platform" in shaders
+        assert "SetMaterial(BaseMat, Instance, GMaxRHIFeatureLevel" in shaders
+        assert "SetMaterial(BaseMat, nullptr" not in shaders
 
     def test_bridge_composed_viewport_capture_uses_slate_screenshot(self):
         """HUD-inclusive capture must read the composed Slate viewport region."""

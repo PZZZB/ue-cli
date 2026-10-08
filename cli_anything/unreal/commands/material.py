@@ -545,6 +545,9 @@ def material_hlsl_code(state: AppState, material_path):
     Contains FMaterialPixelParameters struct and all Custom node code.
     Does NOT contain cbuffer View or Primitive definitions (use shader-source for that).
     MaterialFunction assets return MATERIAL_HLSL_CODE_UNSUPPORTED_ASSET.
+    Requires Bridge 1.40. Preserves effective instance static parameters.
+    UE5 follows active preview; UE4 reports host_rhi compatibility behavior.
+    Missing resources fail without falling back to the base or desktop permutation.
 
     Output: <project>/Saved/CliAnything/<MaterialName>.ush
 
@@ -575,6 +578,8 @@ def material_shader_source(state: AppState, material_path):
 
     Use this to discover what HLSL resources are available when writing
     Custom node code for this material's configuration.
+    Requires Bridge 1.40. Preserves effective instance static parameters at High
+    quality. UE5 follows active preview; UE4 uses the host RHI platform.
 
     Output: <project>/Saved/CliAnything/<MaterialName>_shaders/
 
@@ -590,7 +595,7 @@ def material_shader_source(state: AppState, material_path):
     if "error" in result:
         details = {key: value for key, value in result.items() if key != "error"}
         raise AppError(
-            "MATERIAL_SHADER_SOURCE_FAILED",
+            result.get("code", "MATERIAL_SHADER_SOURCE_FAILED"),
             str(result["error"]),
             exit_code=3,
             suggestion="Check material compile errors and the editor shader compiler log, then retry.",

@@ -2152,6 +2152,82 @@ def test_compile_mixed_resources_remain_unknown_with_observed_errors():
     assert result["compilation_complete"] is False
 
 
+@pytest.mark.parametrize("exporter", ["hlsl", "shader"])
+@pytest.mark.parametrize("version", ["1.39", "unknown"])
+def test_shader_export_rejects_old_or_unknown_bridge(exporter, version):
+    import types
+    from cli_anything.unreal.core import materials
+
+    class Material:
+        pass
+
+    mat = Material()
+    bridge = MagicMock()
+    bridge.get_plugin_version.return_value = version
+    fake_unreal = types.SimpleNamespace(MaterialInterface=Material, CliAnythingBridgeLibrary=bridge)
+    template = (materials._PLUGIN_GET_HLSL_CODE_SCRIPT if exporter == "hlsl"
+                else materials._PLUGIN_GET_SHADER_SOURCE_SCRIPT)
+    namespace = {"_cli_load_material": lambda *args: (mat, "/Game/MI_Test", [])}
+    with patch.dict("sys.modules", {"unreal": fake_unreal}):
+        exec(template.format(material_path="/Game/MI_Test", material_path_candidates_json="[]",
+                             mat_name="MI_Test"), namespace)
+    assert namespace["result"]["code"] == "MATERIAL_SHADER_EXPORT_BRIDGE_UPGRADE_REQUIRED"
+    assert namespace["result"]["loaded_version"] == version
+    bridge.get_material_hlsl_code.assert_not_called()
+    bridge.get_material_shader_source.assert_not_called()
+
+
+@pytest.mark.parametrize("exporter", ["hlsl", "shader"])
+@pytest.mark.parametrize("empty", [False, True])
+@pytest.mark.parametrize("engine, platform, source", [
+    ("5.7.4", "VULKAN_ES3_1_ANDROID_Preview", "active_editor"),
+    ("4.26.2", "PCD3D_SM5", "host_rhi"),
+])
+def test_shader_export_preserves_interface_and_platform(tmp_path, exporter, empty, engine, platform, source):
+    import types
+    from cli_anything.unreal.core import materials
+
+    class Material:
+        pass
+
+    mat = Material()
+    bridge = MagicMock()
+    bridge.get_plugin_version.return_value = "1.40"
+    bridge.get_active_shader_platform.return_value = platform
+
+    def extract_hlsl(requested, path):
+        assert requested is mat
+        Path(path).write_text("instance source\n", encoding="utf-8")
+        return [] if empty else [path]
+
+    def extract_shaders(requested, path):
+        assert requested is mat
+        return [] if empty else ["BasePass\t" + path + "/BasePass.usf\t10"]
+
+    bridge.get_material_hlsl_code.side_effect = extract_hlsl
+    bridge.get_material_shader_source.side_effect = extract_shaders
+    fake_unreal = types.SimpleNamespace(
+        MaterialInterface=Material, CliAnythingBridgeLibrary=bridge,
+        Paths=types.SimpleNamespace(project_saved_dir=lambda: str(tmp_path)),
+        SystemLibrary=types.SimpleNamespace(get_engine_version=lambda: engine),
+    )
+    template = (materials._PLUGIN_GET_HLSL_CODE_SCRIPT if exporter == "hlsl"
+                else materials._PLUGIN_GET_SHADER_SOURCE_SCRIPT)
+    namespace = {"_cli_load_material": lambda *args: (mat, "/Game/MI_Test", [])}
+    with patch.dict("sys.modules", {"unreal": fake_unreal}):
+        exec(template.format(material_path="/Game/MI_Test", material_path_candidates_json="[]",
+                             mat_name="MI_Test"), namespace)
+    result = namespace["result"]
+    assert ("error" in result) is empty
+    assert result["checked_platform"] == platform
+    assert result["platform_source"] == source
+    assert result["resource_scope"] == "material_interface"
+    if not empty:
+        assert result["material"] == "/Game/MI_Test"
+        if exporter == "shader":
+            assert result["quality_level"] == "High"
+
+
 def test_compile_status_script_rejects_legacy_bridge():
     import types
     from cli_anything.unreal.core.materials import _PLUGIN_GET_ERRORS_SCRIPT

@@ -157,6 +157,11 @@ For Custom HLSL, discover available cbuffers/structs (`cbuffer View`, `FPrimitiv
 
 Returns `/Engine/Generated/Material.ush` with `FMaterialPixelParameters` + material structs. No `cbuffer View`.
 Supports Material and MaterialInstanceConstant assets. MaterialFunction assets return `MATERIAL_HLSL_CODE_UNSUPPORTED_ASSET`.
+Requires Bridge 1.40. Both source exporters preserve effective static parameters,
+including inherited instance overrides. UE5 follows active editor preview; UE4
+reports `platform_source=host_rhi`. Check `checked_platform` in the response.
+`hlsl-code` uses the current-quality interface resource and fails if unavailable;
+`shader-source` extracts at High quality. Neither silently substitutes base defaults.
 
 ```bash
 ue-cli material hlsl-code /Game/M_Custom

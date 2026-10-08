@@ -9,6 +9,7 @@
 #include "Materials/MaterialExpressionSetMaterialAttributes.h"
 #include "Materials/MaterialExpressionTextureBase.h"
 #include "Materials/MaterialFunctionInterface.h"
+#include "Materials/MaterialInstance.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Materials/MaterialInterface.h"
 #include "MaterialEditingLibrary.h"
@@ -1384,7 +1385,7 @@ TArray<FString> UCliAnythingBridgeLibrary::GetRecentEngineErrors(int32 Count)
 
 FString UCliAnythingBridgeLibrary::GetPluginVersion()
 {
-	return TEXT("1.39");
+	return TEXT("1.40");
 }
 
 FString UCliAnythingBridgeLibrary::ConnectMaterialOutput(UMaterial* Material, const FString& FromNode, const FString& FromOutputName, const FString& PropertyName)
@@ -1546,13 +1547,11 @@ TArray<FString> UCliAnythingBridgeLibrary::GetMaterialHLSLCode(UMaterialInterfac
 {
 	TArray<FString> Result;
 	if (!Material || OutputPath.IsEmpty()) return Result;
-	UMaterial* BaseMat = Material->GetMaterial();
-	if (!BaseMat) return Result;
 #if ENGINE_MAJOR_VERSION >= 5
-	const EShaderPlatform Platform = GMaxRHIShaderPlatform;
-	FMaterialResource* Resource = BaseMat->GetMaterialResource(Platform);
+	const EShaderPlatform Platform = GEditor ? GEditor->GetActiveShaderPlatform() : GMaxRHIShaderPlatform;
+	FMaterialResource* Resource = Material->GetMaterialResource(Platform);
 #else
-	FMaterialResource* Resource = BaseMat->GetMaterialResource(GMaxRHIFeatureLevel);
+	FMaterialResource* Resource = Material->GetMaterialResource(GMaxRHIFeatureLevel);
 #endif
 	if (!Resource) return Result;
 	FString Source;
@@ -1570,17 +1569,22 @@ TArray<FString> UCliAnythingBridgeLibrary::GetMaterialShaderSource(UMaterialInte
 	if (!Material || OutputDir.IsEmpty()) return Result;
 	UMaterial* BaseMat = Material->GetMaterial();
 	if (!BaseMat) return Result;
+#if ENGINE_MAJOR_VERSION >= 5
+	const EShaderPlatform Platform = GEditor ? GEditor->GetActiveShaderPlatform() : GMaxRHIShaderPlatform;
+#else
 	const EShaderPlatform Platform = GMaxRHIShaderPlatform;
+#endif
 	if (!GEngine || !GEngine->HandleRecompileShadersCommand(TEXT("Changed"), *GLog))
 	{
 		return Result;
 	}
 
 	FMaterialResourceExtractSource* ExtractResource = new FMaterialResourceExtractSource();
+	UMaterialInstance* Instance = Cast<UMaterialInstance>(Material);
 #if ENGINE_MAJOR_VERSION >= 5
-	ExtractResource->SetMaterial(BaseMat, nullptr, Platform, EMaterialQualityLevel::High);
+	ExtractResource->SetMaterial(BaseMat, Instance, Platform, EMaterialQualityLevel::High);
 #else
-	ExtractResource->SetMaterial(BaseMat, nullptr, GMaxRHIFeatureLevel, EMaterialQualityLevel::High);
+	ExtractResource->SetMaterial(BaseMat, Instance, GMaxRHIFeatureLevel, EMaterialQualityLevel::High);
 #endif
 	BaseMat->UpdateCachedExpressionData();
 #if ENGINE_MAJOR_VERSION >= 5

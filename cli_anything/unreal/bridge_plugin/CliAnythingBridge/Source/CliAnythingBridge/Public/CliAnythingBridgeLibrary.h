@@ -122,6 +122,8 @@ public:
 	/**
 	 * Writes the material's translated HLSL code to a file (equivalent to Window > HLSL Code).
 	 * Calls FMaterial::GetMaterialExpressionSource() which triggers the material translator.
+	 * Uses the requested interface's effective static permutation, including inherited overrides.
+	 * UE5 follows the active editor shader platform; UE4 uses the host RHI feature level.
 	 * This is lightweight — no shader dump or RecompileShaders needed.
 	 * Returns: single-element array ["FILE_PATH"] on success, empty on failure.
 	 */
@@ -134,6 +136,8 @@ public:
 	 * Each file is named by shader type (e.g., TBasePassPSFNoLightMapPolicy.usf).
 	 * Returns: array of "SHADER_NAME\tFILE_PATH\tLINE_COUNT" for each shader written.
 	 * The source contains complete cbuffer/struct definitions (View, Primitive, etc.).
+	 * Preserves instance static parameters at High quality. UE5 follows active editor preview;
+	 * UE4 uses the host RHI platform.
 	 * Requires the material to have been compiled at least once (e.g., opened in material editor).
 	 */
 	UFUNCTION(BlueprintCallable, Category = "CliAnything")

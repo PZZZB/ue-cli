@@ -642,7 +642,31 @@ else:
         }}
 '''
 
-_PLUGIN_GET_HLSL_CODE_SCRIPT = r'''import unreal
+_SHADER_EXPORT_CONTEXT_SCRIPT = r'''import unreal
+
+def _cli_shader_export_context(bridge):
+    if bridge is None:
+        return {{"error": "CliAnythingBridgeLibrary is unavailable in this editor", "bridge_missing": True}}
+    version = str(bridge.get_plugin_version())
+    try:
+        version_parts = tuple(int(part) for part in version.split("."))
+    except ValueError:
+        version_parts = ()
+    if version_parts < (1, 40):
+        return {{
+            "error": "Shader export requires Bridge 1.40. Run 'editor plugin-upgrade', then retry.",
+            "code": "MATERIAL_SHADER_EXPORT_BRIDGE_UPGRADE_REQUIRED",
+            "required_version": "1.40",
+            "loaded_version": version,
+        }}
+    return {{
+        "checked_platform": str(bridge.get_active_shader_platform()),
+        "platform_source": "host_rhi" if unreal.SystemLibrary.get_engine_version().startswith("4.") else "active_editor",
+        "resource_scope": "material_interface",
+    }}
+'''
+
+_PLUGIN_GET_HLSL_CODE_SCRIPT = _SHADER_EXPORT_CONTEXT_SCRIPT + r'''import unreal
 import os
 
 material_path = "{material_path}"
@@ -665,6 +689,9 @@ else:
             "supported_classes": ["Material", "MaterialInstanceConstant"],
         }}
     else:
+        result = _cli_shader_export_context(bridge)
+    if mat is not None and "error" not in result:
+        export_context = result
         # Construct output path under project Saved/CliAnything/
         _saved = unreal.Paths.project_saved_dir()
         output_path = os.path.join(_saved, "CliAnything", "{mat_name}.ush")
@@ -679,12 +706,13 @@ else:
                 "file": output_path,
                 "lines": lines,
                 "source": "plugin",
+                **export_context,
             }}
         else:
-            result = {{"error": "GetMaterialHLSLCode returned empty. Material may not be compiled yet."}}
+            result = {{"error": "No HLSL source for the requested material interface and platform. Its resource may be unavailable or translation failed.", **export_context}}
 '''
 
-_PLUGIN_GET_SHADER_SOURCE_SCRIPT = r'''import unreal
+_PLUGIN_GET_SHADER_SOURCE_SCRIPT = _SHADER_EXPORT_CONTEXT_SCRIPT + r'''import unreal
 import os
 
 material_path = "{material_path}"
@@ -693,7 +721,10 @@ mat, loaded_asset_path, tried_asset_paths = _cli_load_material(material_path, ma
 if mat is None:
     result = {{"error": "Material not found: " + material_path, "tried": tried_asset_paths}}
 else:
-    bridge = unreal.CliAnythingBridgeLibrary
+    bridge = getattr(unreal, "CliAnythingBridgeLibrary", None)
+    result = _cli_shader_export_context(bridge)
+if mat is not None and "error" not in result:
+    export_context = result
     # Construct output dir under project Saved/CliAnything/
     _saved = unreal.Paths.project_saved_dir()
     output_dir = os.path.join(_saved, "CliAnything", "{mat_name}_shaders")
@@ -712,6 +743,7 @@ else:
             "error": "Shader source extraction returned no shaders after refreshing changed shader files.",
             "material": loaded_asset_path,
             "output_dir": output_dir,
+            **export_context,
         }}
     else:
         result = {{
@@ -721,6 +753,8 @@ else:
             "output_dir": output_dir,
             "shader_cache_refresh": "changed",
             "source": "plugin",
+            "quality_level": "High",
+            **export_context,
         }}
 '''
 

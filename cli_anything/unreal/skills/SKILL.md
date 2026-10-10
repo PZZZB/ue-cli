@@ -30,6 +30,7 @@ Verify install first: `ue-cli --version`.
 
 ## Usage Conventions
 
+- **Remote host mode.** When a VM/client has a default remote connection, ordinary commands execute on the fixed host project. Start with `ue-cli remote health` and `ue-cli editor status`; use the same commands and native task IDs below. Do not install an engine in the VM or fall back to `--local` when the service fails. Source edits happen in the shared work directory; host UE/build processes use the host's account and network. For setup, script paths, screenshot downloads and interrupted requests, read [Remote Host](references/remote.md).
 - **JSON by default.** Non-TTY callers get JSON. To force it, `--output json` is top-level and must appear before subcommand:
   - OK: `ue-cli --output json editor launch`
   - Bad: `ue-cli editor launch --output json`

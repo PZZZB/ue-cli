@@ -128,20 +128,8 @@ def output(data, state: AppState):
         emit_json(success_payload(data))
         return
 
-    if isinstance(data, dict):
-        for k, v in data.items():
-            if isinstance(v, (dict, list)):
-                click.echo(f"{k}: {json.dumps(v, indent=2, ensure_ascii=False, default=str)}")
-            else:
-                click.echo(f"{k}: {v}")
-        return
-
-    if isinstance(data, list):
-        for item in data:
-            click.echo(json.dumps(item, ensure_ascii=False, default=str) if isinstance(item, dict) else str(item))
-        return
-
-    click.echo(str(data))
+    from cli_anything.unreal.utils.output import format_text_output
+    click.echo(format_text_output(data), nl=False)
 
 
 def fail(
@@ -577,6 +565,7 @@ def register_commands(cli_group: click.Group):
     from cli_anything.unreal.commands.session import session_group
     from cli_anything.unreal.commands.skills import register as register_skills
     from cli_anything.unreal.commands.repl import register as register_repl
+    from cli_anything.unreal.commands.remote import remote_group
 
     cli_group.add_command(project_group)
     cli_group.add_command(asset_group)
@@ -592,5 +581,6 @@ def register_commands(cli_group: click.Group):
     cli_group.add_command(confirmation_group)
     cli_group.add_command(preflight_cmd)
     cli_group.add_command(session_group)
+    cli_group.add_command(remote_group)
     register_skills(cli_group)
     register_repl(cli_group)

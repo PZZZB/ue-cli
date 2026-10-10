@@ -23,6 +23,7 @@ from cli_anything.unreal.commands import (
     register_commands,
 )
 from cli_anything.unreal.core.plugin_bridge import get_bundled_version
+from cli_anything.unreal.core import remote_client
 from cli_anything.unreal.core.tasks import (
     FINAL_TASK_STATUSES,
     cancel_task,
@@ -428,7 +429,28 @@ def _default_output_mode() -> str:
     return "text" if sys.stdout.isatty() else "json"
 
 
-@click.group(invoke_without_command=True, context_settings=_CONTEXT_SETTINGS)
+class RemoteRoutingGroup(click.Group):
+    """Intercept remote commands before local project and Click command parsing."""
+
+    def main(self, args=None, prog_name=None, complete_var=None, standalone_mode=True, **extra):
+        args = list(sys.argv[1:] if args is None else args)
+        try:
+            forwarded, profile = remote_client.routing_profile(args)
+            if profile is not None:
+                code = remote_client.run_remote(profile, forwarded)
+                if standalone_mode:
+                    raise SystemExit(code)
+                return code
+        except remote_client.RemoteError as exc:
+            emit_json(error_payload(exc.code, exc.message, suggestion=exc.suggestion, details=exc.details))
+            if standalone_mode:
+                raise SystemExit(exc.exit_code)
+            return exc.exit_code
+        return super().main(args=forwarded, prog_name=prog_name, complete_var=complete_var,
+                            standalone_mode=standalone_mode, **extra)
+
+
+@click.group(cls=RemoteRoutingGroup, invoke_without_command=True, context_settings=_CONTEXT_SETTINGS)
 @click.version_option(
     __version__,
     prog_name="ue-cli",
@@ -438,8 +460,10 @@ def _default_output_mode() -> str:
 @click.option("--project", "project_path", type=click.Path(), help="Path to .uproject file")
 @click.option("--port", type=int, default=None, help="Editor Remote Control API port (auto-detected from a unique live editor or project config if omitted)")
 @click.option("--list-commands", is_flag=True, help="List CLI commands in a machine-readable format")
+@click.option("--remote", "remote_name", default=None, help="Run commands on a named remote host.")
+@click.option("--local", "local_only", is_flag=True, help="Execute locally, ignoring the default remote connection.")
 @click.pass_context
-def cli(ctx, output_mode, project_path, port, list_commands):
+def cli(ctx, output_mode, project_path, port, list_commands, remote_name, local_only):
     state = AppState()
     state.output_mode = output_mode or _default_output_mode()
     state.json_output = state.output_mode == "json"

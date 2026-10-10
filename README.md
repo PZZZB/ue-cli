@@ -36,6 +36,77 @@ If `ue-cli` is not found after installation, run it as:
 python -m cli_anything.unreal --version
 ```
 
+## Remote host execution
+
+The same CLI can run on a VM/client and on the workstation that has Unreal and
+the compiler. Share the intended project directory for source edits, then run
+the authenticated service in the host's logged-in desktop session:
+
+```powershell
+ue-cli --local --project D:/Game/Game.uproject remote serve `
+  --bind 192.168.168.1 --port 17891 --allow-client 192.168.168.10 `
+  --token-file D:/Private/ue-cli.token --expected-engine D:/UnrealEngine
+```
+
+Use a cryptographically random token of at least 32 characters. Store the same
+token in private files on both machines, outside shared projects; restrict those
+files with OS permissions. The service defaults to loopback. A non-loopback
+listener requires explicit client IPs. Use a private isolated network or a secure
+tunnel; the service's built-in HTTP listener does not encrypt traffic. Only open
+its port on the intended interface and for the intended client.
+
+Install `ue-cli` on the client (Unreal and the compiler are only needed on the
+host), then save and select a connection:
+
+```powershell
+ue-cli remote add host-game --url http://192.168.168.1:17891 `
+  --token-file C:/Private/ue-cli.token --local-project C:/Projects/Game --default
+ue-cli remote health
+ue-cli --remote host-game editor status
+ue-cli build compile --platform Win64 --config Development --no-wait
+ue-cli task status <task_id>
+ue-cli editor launch
+ue-cli screenshot capture --path C:/Temp/viewport.png --include-ui
+```
+
+The named/default connection is stored in `~/.ue-cli/remotes.json` (override with
+`UE_CLI_REMOTE_CONFIG`). `remote list`, `remote use NAME`, and `remote use --clear`
+manage it. `--local` explicitly selects local execution. Remote management,
+skill installation, root help/version and internal task workers stay local.
+When a selected service is unavailable or rejects a request, the CLI fails;
+it never silently retries the operation locally.
+
+Commands use the host's existing Click parser and implementations. Native task
+IDs, completion states, errors and exit codes remain intact. Long synchronous
+commands stream bounded progress to stderr while final stdout retains the
+normal result. `--no-wait` and subsequent `task status`/`task wait` work as usual.
+If polling loses the connection, use the reported transport request ID with
+`ue-cli remote result REQUEST_ID --connection host-game`; this waits for the same
+request without executing it again. If submission loses its receipt, inspect
+host task/editor state before retrying. Transport receipts expire and are lost
+on a service restart; persistent native UE task records remain authoritative.
+
+Screenshots are downloaded with size/hash checks, and result paths point at
+client files. `screenshot capture --path` refers to a client destination.
+`editor run-script -` forwards stdin. Script files within the shared project map
+to host files, preserving `__file__` and imports from their directory. Other client
+scripts are sent as stdin; their sibling files are not uploaded. Absolute file
+arguments inside `--local-project` map to the
+fixed host project. Other OS file paths refer to the host; this is not a general
+file-upload service. UE `/Game/...` asset paths keep their normal meaning.
+
+The service fixes the project/engine and rejects project/port overrides,
+cross-project task control, transport recursion and local installation commands.
+Authorized clients still have the capabilities of local UE CLI commands:
+editor Python, build scripts and plugins run with the host user's permissions.
+This is a trusted development connection, not an execution sandbox. It does not
+create a general network gateway for the VM.
+
+Remote protocol version 1 is negotiated before execution. Upgrade both packages
+together when changing the wire protocol. New ordinary commands use the same
+transport without requiring a separate MCP command mapping. File-transfer or
+context-changing features may require an explicit remote policy update.
+
 ## First Run
 
 Use forward slashes in Windows paths. Quote paths so projects under directories containing spaces also work:

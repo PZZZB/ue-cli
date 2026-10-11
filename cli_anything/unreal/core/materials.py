@@ -889,6 +889,10 @@ def get_material_shader_source(
     material_path: str,
     output_dir: str | None = None,
     project_dir: str | None = None,
+    *,
+    timeout: float = 120.0,
+    project_path: str | None = None,
+    log_file: Path | None = None,
 ) -> dict:
     """Get the compiled shader source (.usf files) for a material via the Bridge plugin.
 
@@ -901,6 +905,9 @@ def get_material_shader_source(
         material_path: Content path (e.g. /Game/M_Test).
         output_dir: Optional custom output directory. Defaults to project Saved dir.
         project_dir: Project directory for auto-deploying the plugin.
+        timeout: HTTP wait in seconds; a lost response does not cancel extraction.
+        project_path: Project identity for durable completion observation.
+        log_file: Active editor log, captured before dispatch for observation.
 
     Returns:
         {"material": str, "shader_count": int, "shaders": [...], "output_dir": str}
@@ -912,13 +919,22 @@ def get_material_shader_source(
 
     mat_name = material_path.rsplit("/", 1)[-1].split(".")[0]
 
+    try:
+        log_start = log_file.stat().st_size if log_file else 0
+    except OSError:
+        log_start = 0
     result = _exec_material_script(
         api,
         _PLUGIN_GET_SHADER_SOURCE_SCRIPT,
-        timeout=120.0,
+        timeout=timeout,
+        log_observation=True,
         save_policy=SavePolicy.NEVER,
         material_path=material_path,
         mat_name=mat_name,
+    )
+    result = _observe_shader_source_result(
+        result, project_path=project_path, log_file=log_file,
+        log_start=log_start, timeout=timeout,
     )
 
     if "error" in result and "CliAnythingBridgeLibrary" in result.get("error", ""):
@@ -933,6 +949,68 @@ def get_material_shader_source(
         }
 
     return result
+
+
+def _observe_shader_source_result(
+    result: dict, *, project_path: str | None, log_file: Path | None,
+    log_start: int, timeout: float,
+) -> dict:
+    """Recover a lost transport response without repeating shader compilation."""
+    begin = result.pop("_log_begin_marker", None)
+    end = result.pop("_log_end_marker", None)
+    marker = result.pop("_log_result_marker", None)
+    # These markers are returned only for transport failures, not UE exceptions.
+    if not (result.get("error") and begin and end and marker):
+        return result
+
+    from cli_anything.unreal.core.editor_exec import create_editor_run_script_observation
+
+    task = create_editor_run_script_observation(
+        project_path=project_path, log_file=log_file, log_start=log_start,
+        begin_marker=begin, end_marker=end, result_marker=marker,
+        source_kind="material.shader-source", source_path=None, no_save=True,
+    )
+    observed = task.get("result") or {}
+    details = {
+        "task_id": task["task_id"],
+        "task_status": task["status"],
+        "phase": task.get("phase"),
+        "delivery_state": observed.get("delivery_state", "unknown"),
+        "completion_state": observed.get("completion_state", "unknown"),
+        "timeout_seconds": timeout,
+        "transport_error": result["error"],
+        "log_file": str(log_file) if log_file else None,
+        "retry_safe": False,
+        "next_command": f"ue-cli task status {task['task_id']}",
+        "wait_command": f"ue-cli task wait {task['task_id']} --timeout 600",
+    }
+    if task["status"] == "completed":
+        return {
+            **observed["script_result"],
+            "task_id": task["task_id"],
+            "capture_mode": "editor_log_file",
+            "transport_response_recovered": True,
+        }
+    if task["status"] == "failed":
+        error = task.get("error") or {}
+        raise UeCliError(
+            "MATERIAL_SHADER_SOURCE_FAILED",
+            str(error.get("message") or "Shader source extraction failed."),
+            exit_code=3, details={**details, "observation": observed},
+            suggestion="Inspect the captured extraction error before retrying.",
+        )
+    running = details["completion_state"] == "running"
+    raise UeCliError(
+        "MATERIAL_SHADER_SOURCE_IN_PROGRESS" if running else "MATERIAL_SHADER_SOURCE_DELIVERY_UNKNOWN",
+        "The HTTP response was lost; editor-side extraction has not been confirmed complete.",
+        exit_code=4 if running else 3, details=details,
+        suggestion=(
+            f"Observe the original request with `{details['next_command']}`. "
+            "Do not redispatch while completion remains unknown or running. "
+            "Use --timeout for future extractions."
+            + (" The editor log is unavailable; restore log access to observe completion." if not log_file else "")
+        ),
+    )
 
 
 def get_material_texture_list(
@@ -1932,6 +2010,7 @@ def _exec_material_script(
     save: bool | None = None,
     save_policy: SavePolicy | str | None = None,
     target_packages: list[str] | None = None,
+    log_observation: bool = False,
     **kwargs,
 ) -> dict:
     """Execute a material query Python script in the editor and read results.
@@ -1973,4 +2052,5 @@ def _exec_material_script(
         save=save,
         save_policy=save_policy,
         target_packages=target_packages,
+        log_observation=log_observation,
     )

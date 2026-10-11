@@ -566,9 +566,11 @@ def material_hlsl_code(state: AppState, material_path):
 
 @material_group.command("shader-source")
 @click.argument("material_path")
+@click.option("--timeout", type=click.IntRange(min=1), default=120, show_default=True,
+              help="HTTP wait in seconds; lost responses return a read-only observation task.")
 @handle_error
 @click.pass_obj
-def material_shader_source(state: AppState, material_path):
+def material_shader_source(state: AppState, material_path, timeout):
     """Get compiled shader source code (.usf files) for a material.
 
     Forces a synchronous recompile with source extraction enabled, then writes
@@ -586,12 +588,16 @@ def material_shader_source(state: AppState, material_path):
     Example: material shader-source /Game/M_Test
     """
     from cli_anything.unreal.core.materials import get_material_shader_source
+    from cli_anything.unreal.commands.editor import _resolve_editor_log_file
 
     api = require_editor(state)
     require_project(state)
 
     result = get_material_shader_source(api, material_path,
-                                         project_dir=state.session.project_dir)
+                                         project_dir=state.session.project_dir,
+                                         timeout=timeout,
+                                         project_path=state.session.project_path,
+                                         log_file=_resolve_editor_log_file(state))
     if "error" in result:
         details = {key: value for key, value in result.items() if key != "error"}
         raise AppError(

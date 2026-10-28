@@ -227,7 +227,7 @@ All material commands require editor.
 | `material disconnect PATH --from NODE [--from-output PIN] --to NODE --to-input PIN` | Disconnect nodes |
 | `material set-param PATH --name N --value V --type scalar\|vector\|texture` | Set and readback-verify MaterialInstance param (`applied` / `readback_match`) |
 | `material get-param PATH --name N` | Get MaterialInstance param |
-| `material recompile PATH` | Force shader recompile |
+| `material recompile PATH [--save]` | Force shader recompile; no disk save by default. May leave package dirty in memory. `--save` saves only the target package. |
 
 ## blueprint - Blueprint Viewing & Editing
 

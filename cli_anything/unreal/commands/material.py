@@ -518,10 +518,11 @@ def material_set_param(state: AppState, material_path, param_name, param_value, 
 
 @material_group.command("recompile")
 @click.argument("material_path")
+@click.option("--save", is_flag=True, help="Save the target material package after recompiling.")
 @handle_error
 @click.pass_obj
-def material_recompile(state: AppState, material_path):
-    """Recompile a material (force shader recompilation).
+def material_recompile(state: AppState, material_path, save):
+    """Recompile shaders without saving by default. May leave the material dirty.
 
     Example: material recompile /Game/M_Test
     """
@@ -529,7 +530,7 @@ def material_recompile(state: AppState, material_path):
 
     api = require_editor(state)
     result = recompile_material(api, material_path,
-                                project_dir=state.session.project_dir)
+                                project_dir=state.session.project_dir, save=save)
     raise_for_legacy_error(result, default_code="MATERIAL_RECOMPILE_FAILED")
     output(result, state)
 

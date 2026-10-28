@@ -1321,6 +1321,49 @@ class TestMaterialEditing:
             "bOnlyIfIsDirty": False,
         }
 
+    @pytest.mark.parametrize("status", ["ok", "error"])
+    @pytest.mark.parametrize("save", [False, True])
+    def test_recompile_saves_only_when_requested(self, status, save):
+        from cli_anything.unreal.core.materials import recompile_material
+
+        api = MagicMock()
+        payload = {"status": status, "action": "recompile"}
+        if status == "error":
+            payload.update(error="Material compilation failed.", compile_errors=["bad HLSL"])
+        api.call_function.side_effect = [
+            {"ReturnValue": json.dumps(payload)}, {"ReturnValue": True},
+        ]
+        kwargs = {"save": True} if save else {}
+        result = recompile_material(api, "/Game/Env/M_Test.M_Test", **kwargs)
+
+        assert result["saved"] is save
+        assert result["saved_packages"] == (["/Game/Env/M_Test"] if save else [])
+        assert [c.args[1] for c in api.call_function.call_args_list] == (
+            ["RecompileMaterial", "SaveAsset"] if save else ["RecompileMaterial"]
+        )
+        if status == "error":
+            assert result["compile_errors"] == ["bad HLSL"]
+        if save:
+            assert api.call_function.call_args.args[2] == {
+                "AssetToSave": "/Game/Env/M_Test", "bOnlyIfIsDirty": False,
+            }
+
+    @pytest.mark.parametrize("save", [False, True])
+    def test_recompile_cli_save_option(self, save):
+        from click.testing import CliRunner
+        from cli_anything.unreal.unreal_cli import cli
+
+        with patch("cli_anything.unreal.commands.material.require_editor"), patch(
+            "cli_anything.unreal.core.materials.recompile_material"
+        ) as recompile:
+            recompile.return_value = {"status": "ok", "saved": save}
+            args = ["--output", "json", "material", "recompile", "/Game/M_Test"]
+            if save:
+                args.append("--save")
+            result = CliRunner().invoke(cli, args)
+        assert result.exit_code == 0, result.output
+        assert recompile.call_args.kwargs["save"] is save
+
     def test_native_edit_reports_target_save_failure(self):
         from cli_anything.unreal.core.materials import _call_material_edit_bridge
 
@@ -1711,6 +1754,7 @@ class TestMaterialEditing:
             "RecompileMaterial",
             "/Game/M_Test",
             timeout=120,
+            save=False,
         )
 
     @patch("cli_anything.unreal.core.materials._call_material_edit_bridge")
@@ -1727,6 +1771,7 @@ class TestMaterialEditing:
             "RecompileMaterial",
             "/Game/Env/M_Test.M_Test",
             timeout=120,
+            save=False,
         )
 
     @patch("cli_anything.unreal.core.script_runner.run_python_code")

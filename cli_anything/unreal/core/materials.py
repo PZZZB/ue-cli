@@ -474,6 +474,7 @@ def _call_material_edit_bridge(
     parameters: dict | None = None,
     *,
     timeout: int = 120,
+    save: bool = True,
 ) -> dict:
     call_parameters = {"Material": _material_object_path(material_path)}
     call_parameters.update(parameters or {})
@@ -487,6 +488,11 @@ def _call_material_edit_bridge(
         generate_transaction=True,
     )
     if result.get("status") not in {"ok", "error"}:
+        return result
+
+    if not save:
+        result["saved"] = False
+        result["saved_packages"] = []
         return result
 
     package_path = _material_package_path(material_path)
@@ -1526,13 +1532,17 @@ def recompile_material(
     api: UEEditorAPI,
     material_path: str,
     project_dir: str | None = None,
+    *,
+    save: bool = False,
 ) -> dict:
-    """Recompile a material.
+    """Recompile a material without saving unless explicitly requested.
 
     Args:
         api: Connected UEEditorAPI instance.
         material_path: Content path.
         project_dir: Project directory for temp files.
+        save: Save the target package after recompiling. Recompilation may
+            leave it dirty in memory even when saving is disabled.
 
     Returns:
         {"status": "ok", "action": "recompile"} or {"error": str}
@@ -1542,6 +1552,7 @@ def recompile_material(
         "RecompileMaterial",
         material_path,
         timeout=120,
+        save=save,
     )
 
 

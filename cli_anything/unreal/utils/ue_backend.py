@@ -26,11 +26,12 @@ def find_engine_root(uproject_path: Optional[str] = None) -> Optional[str]:
        a. If it's a directory path, use directly
        b. If it's a version string (e.g. "5.7"), look up in registry
     2. Check UE_ENGINE_ROOT environment variable
-    3. Windows registry (any registered engine, no version filter)
+    3. Windows registry (any engine), only without a nonempty association
 
     Returns:
         Engine root path or None.
     """
+    assoc = ""
     # Strategy 1: From .uproject
     if uproject_path:
         uproject = Path(uproject_path)
@@ -55,6 +56,10 @@ def find_engine_root(uproject_path: Optional[str] = None) -> Optional[str]:
     env_root = os.environ.get("UE_ENGINE_ROOT")
     if env_root and _validate_engine_root(env_root):
         return env_root
+
+    # A declared association must never silently select an unrelated engine.
+    if assoc:
+        return None
 
     # Strategy 3: Windows registry (any registered engine)
     reg_root = _find_engine_from_registry()

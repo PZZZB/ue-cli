@@ -127,6 +127,12 @@ If engine discovery fails for a custom source build, set its root and rerun `pre
 $env:UE_ENGINE_ROOT = "F:/path/to/UnrealEngine"
 ```
 
+A nonempty `EngineAssociation` must resolve to its matching engine. If it cannot
+be resolved, ue-cli will not fall back to an unrelated installed engine. Register
+the association or set `UE_ENGINE_ROOT` explicitly as above. A resolved project
+association takes priority over that environment variable. Build commands return
+`ENGINE_NOT_FOUND` before submitting a task when no engine can be resolved.
+
 Start the controlled editor:
 
 ```powershell

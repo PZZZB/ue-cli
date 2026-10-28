@@ -31,6 +31,14 @@ from cli_anything.unreal.utils.ue_http_api import UEEditorAPI
 
 
 def _build_payload(state: AppState, label: str, **kwargs) -> dict:
+    if not state.session.engine_root:
+        raise AppError(
+            "ENGINE_NOT_FOUND",
+            "Could not resolve the project's engine association or an explicit engine root.",
+            exit_code=3,
+            suggestion="Register the project's EngineAssociation or set UE_ENGINE_ROOT to the intended engine directory.",
+            details={"project_path": state.session.project_path},
+        )
     payload = {
         "project_path": state.session.project_path,
         "engine_root": state.session.engine_root,

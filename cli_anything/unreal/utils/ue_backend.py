@@ -2532,6 +2532,17 @@ def preflight_check(uproject_path: str, engine_root: str | None = None) -> dict:
     return result
 
 
+def _is_commandlet_process(cmdline: str | None) -> bool:
+    """Exclude explicit commandlet modes, not the dual-use -Cmd executable."""
+    import shlex
+    try:
+        arguments = shlex.split(cmdline or "")
+    except ValueError:
+        return False
+    return any(arg.lower().startswith("-run=") or arg.lower() == "-cookworker"
+               for arg in arguments[1:])
+
+
 def find_running_editors(timeout: float | None = None) -> list[dict]:
     """Find running UnrealEditor processes and their project paths.
 
@@ -2575,6 +2586,8 @@ def find_running_editors(timeout: float | None = None) -> list[dict]:
             for proc in data:
                 cmdline = proc.get("CommandLine", "")
                 pid = proc.get("ProcessId", 0)
+                if _is_commandlet_process(cmdline):
+                    continue
                 project = _extract_uproject_from_cmdline(cmdline)
                 editors.append({
                     "pid": int(pid),
@@ -2606,6 +2619,8 @@ def find_running_editors(timeout: float | None = None) -> list[dict]:
                 if len(parts) >= 3:
                     cmdline = ",".join(parts[1:-1])
                     pid = parts[-1].strip()
+                    if _is_commandlet_process(cmdline):
+                        continue
                     project = _extract_uproject_from_cmdline(cmdline)
                     editors.append({
                         "pid": int(pid) if pid.isdigit() else 0,

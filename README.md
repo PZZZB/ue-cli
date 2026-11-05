@@ -411,3 +411,5 @@ UE Remote Control and Python have version-specific automation bugs. See [ENGINE_
 ## Problems and Support
 
 Report reproducible ue-cli problems at [PZZZB/ue-cli issues](https://github.com/PZZZB/ue-cli/issues). Include ue-cli version, Unreal version, exact command, expected behavior, actual behavior, minimal reproduction, and sanitized logs.
+
+On Windows, editor discovery excludes explicit `-run=...` commandlets and `-cookworker` processes. An active Cook therefore does not trigger the offline GUI editor launch guard. The `-Cmd.exe` filename alone does not exclude a process.
